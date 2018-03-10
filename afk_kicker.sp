@@ -4,14 +4,14 @@
 #pragma semicolon 1
 #pragma newdecls required
 
-#define PLUGIN_VERSION "1.0"
+#define PLUGIN_VERSION "1.2"
 
 bool gB_Late;
 
 public Plugin myinfo =
 {
 	name = "Simple AFK Kicker",
-	author = "shavit",
+	author = "shavit & modified by madwayz",
 	description = "Checks for AFK players and kicks them if they fail a verification.",
 	version = PLUGIN_VERSION,
 	url = "http://forums.alliedmods.net/member.php?u=163134"
@@ -53,14 +53,14 @@ public void OnPluginStart()
 	HookEvent("round_start", Round_Start);
 	HookEvent("round_end", Round_End);
 
-	CreateConVar("afk_kicker_version", PLUGIN_VERSION, "Plugin version.", FCVAR_PLUGIN|FCVAR_NOTIFY|FCVAR_DONTRECORD);
+	CreateConVar("afk_kicker_version", PLUGIN_VERSION, "Plugin version.", FCVAR_NOTIFY|FCVAR_DONTRECORD);
 
-	gCV_AdminImmune = CreateConVar("afk_kicker_admin_immunity", "1", "Are admins immunable to AFK kicks?", FCVAR_PLUGIN);
-	gCV_WaitTime = CreateConVar("afk_kicker_wait_time", "30.0", "Time to wait since the round starts before verifying players.", FCVAR_PLUGIN);
-	gCV_Verify = CreateConVar("afk_kicker_verify", "1", "Verify if a player is AFK by sending a captcha-like menu?\nSetting to 0 will result in an instant kick upon suspicion of an AFK player and may cause false positives.", FCVAR_PLUGIN);
-	gCV_CaptchaTime = CreateConVar("afk_kicker_captcha_time", "12", "How much time will a player have to answer the captcha?", FCVAR_PLUGIN);
-	gCV_Matches = CreateConVar("afk_kicker_matches_required", "2", "Amount of matches (same data since the round starts) required before sending verifications.\nMatches:\nKey presses, crosshair position and player position.", FCVAR_PLUGIN);
-	gCV_Logging = CreateConVar("afk_kicker_logging", "1", "Log kicks to \"addons/sourcemod/logs/afk_kicker.log\"?", FCVAR_PLUGIN);
+	gCV_AdminImmune = CreateConVar("afk_kicker_admin_immunity", "1", "Are admins immunable to AFK kicks?");
+	gCV_WaitTime = CreateConVar("afk_kicker_wait_time", "30.0", "Time to wait since the round starts before verifying players.");
+	gCV_Verify = CreateConVar("afk_kicker_verify", "1", "Verify if a player is AFK by sending a captcha-like menu?\nSetting to 0 will result in an instant kick upon suspicion of an AFK player and may cause false positives.");
+	gCV_CaptchaTime = CreateConVar("afk_kicker_captcha_time", "12", "How much time will a player have to answer the captcha?");
+	gCV_Matches = CreateConVar("afk_kicker_matches_required", "2", "Amount of matches (same data since the round starts) required before sending verifications.\nMatches:\nKey presses, crosshair position and player position.");
+	gCV_Logging = CreateConVar("afk_kicker_logging", "1", "Log kicks to \"addons/sourcemod/logs/afk_kicker.log\"?");
 
 	AutoExecConfig();
 
@@ -73,7 +73,7 @@ public void OnClientPutInServer(int client)
 	gF_Angles[client] = view_as<float>({0.0, 0.0, 0.0});
 	gI_Buttons[client] = 0;
 	gI_Matches[client] = 0;
-}
+}	
 
 public void Round_Start(Handle event, const char[] name, bool dB)
 {
@@ -82,15 +82,18 @@ public void Round_Start(Handle event, const char[] name, bool dB)
 		delete gT_RoundStart;
 	}
 
-	for(int i = 1; i <= MaxClients; i++)
+	if(!IsPaused() && !IsWarmup() && !IsFreezeTime())
 	{
-		if(IsValidClient(i, true))
+		for(int i = 1; i <= MaxClients; i++)
 		{
-			GetClientAbsOrigin(i, gF_Position[i]);
-			GetClientEyeAngles(i, gF_Angles[i]);
+			if(IsValidClient(i, true))
+			{
+				GetClientAbsOrigin(i, gF_Position[i]);
+				GetClientEyeAngles(i, gF_Angles[i]);
 
-			gI_Buttons[i] = GetClientButtons(i);
-			gI_Matches[i] = 0;
+				gI_Buttons[i] = GetClientButtons(i);
+				gI_Matches[i] = 0;
+			}
 		}
 	}
 
@@ -103,7 +106,7 @@ public Action Timer_AFKCheck(Handle Timer)
 	{
 		if(IsValidClient(i, true))
 		{
-			if(gCV_AdminImmune.BoolValue && CheckCommandAccess(i, "afk-kicker-immunity", ADMFLAG_GENERIC))
+			if(gCV_AdminImmune.BoolValue && CheckCommandAccess(i, "afk-kicker-immunity", ADMFLAG_ROOT))
 			{
 				continue;
 			}
@@ -135,7 +138,7 @@ public Action Timer_AFKCheck(Handle Timer)
 
 			gI_Matches[i] = iMatches;
 
-			if(iMatches >= gCV_Matches.IntValue)
+			if(iMatches >= gCV_Matches.IntValue && !IsPaused() && !IsWarmup() && !IsFreezeTime())
 			{
 				if(gCV_Verify.BoolValue)
 				{
@@ -159,12 +162,8 @@ public void PopupAFKMenu(int client, int time)
 {
 	Menu m = new Menu(MenuHandler_AFKVerification);
 
-	m.SetTitle("[AFK kicker] You there?");
-
-	AddKickItemsToMenu(m, GetRandomInt(1, 4));
-	m.AddItem("stay", "Yes - Don't kick me!");
-	AddKickItemsToMenu(m, GetRandomInt(2, 3));
-
+	m.SetTitle("Может быть Вас кикнуть?");
+	m.AddItem("stay", "Нет! Не кикайте меня, я здесь!");
 	m.ExitButton = false;
 
 	m.Display(client, time);
@@ -181,12 +180,7 @@ public int MenuHandler_AFKVerification(Menu m, MenuAction a, int p1, int p2)
 
 			if(StrEqual(buffer, "stay"))
 			{
-				PrintHintText(p1, "AFK verification succeed!\nYou will not get kicked.");
-			}
-
-			else
-			{
-				NukeClient(p1, true, gI_Matches[p1], "(failed captcha)");
+				PrintHintText(p1, "AFK верификация пройдена успешно!\n Вы не будете кикнуты.");
 			}
 		}
 
@@ -195,7 +189,7 @@ public int MenuHandler_AFKVerification(Menu m, MenuAction a, int p1, int p2)
 			// no response
 			if(p2 == MenuCancel_Timeout)
 			{
-				NukeClient(p1, true, gI_Matches[p1], "(did not reply to captcha)");
+				NukeClient(p1, true, gI_Matches[p1], "(Не ответил капче)");
 			}
 		}
 
@@ -213,7 +207,7 @@ public void NukeClient(int client, bool bLog, int iMatches, const char[] sLog)
 {
 	if(IsValidClient(client))
 	{
-		KickClient(client, "You were kicked for being AFK.");
+		KickClient(client, "Вы были кикнуты за AFK.");
 
 		if(gCV_Logging.BoolValue && bLog)
 		{
@@ -231,18 +225,6 @@ public void Round_End(Handle event, const char[] name, bool dB)
 	}
 }
 
-public void AddKickItemsToMenu(Menu m, int amount)
-{
-	char sJunk[16];
-
-	for(int i = 1; i <= amount; i++)
-	{
-		GetRandomString(sJunk, 16);
-
-		m.AddItem("kick", sJunk);
-	}
-}
-
 stock bool IsValidClient(int client, bool bAlive = false)
 {
 	return (client >= 1 && client <= MaxClients && IsClientConnected(client) && IsClientInGame(client) && !IsClientSourceTV(client) && (!bAlive || IsPlayerAlive(client)));
@@ -253,39 +235,17 @@ stock bool bVectorsEqual(float[3] v1, float[3] v2)
 	return (v1[0] == v2[0] && v1[1] == v2[1] && v1[2] == v2[2]);
 }
 
-// I took this one from smlib iirc and converted to the transitional syntax, thanks.
-public void GetRandomString(char[] buffer, int size)
+stock bool IsPaused() 
+{	
+	return view_as<bool>(GameRules_GetProp("m_bMatchWaitingForResume"));
+}
+
+stock bool IsWarmup() 
 {
-	int random;
-	int len;
-	size--;
+	return view_as<bool>(GameRules_GetProp("m_bWarmupPeriod"));
+}
 
-	int length = 16;
-	char chrs[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ01234556789";
-
-	if(chrs[0] != '\0')
-	{
-		len = strlen(chrs) - 1;
-	}
-
-	int n = 0;
-
-	while(n < length && n < size)
-	{
-		if(chrs[0] == '\0')
-		{
-			random = GetRandomInt(33, 126);
-			buffer[n] = random;
-		}
-
-		else
-		{
-			random = GetRandomInt(0, len);
-			buffer[n] = chrs[random];
-		}
-
-		n++;
-	}
-
-	buffer[length] = '\0';
+stock bool IsFreezeTime()
+{
+	return view_as<bool>(GameRules_GetProp("m_bFreezePeriod"));
 }
